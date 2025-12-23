@@ -82,6 +82,71 @@ Tool hierarchy is defined in `testdata/mcp_hierarchy/` with JSON files:
 ./mcp-proxy --help
 ```
 
+## Permission Control with Claude Code Hooks
+
+When using lazy-mcp with Claude Code, all tool calls go through `execute_tool`. This means traditional MCP permission rules (like `mcp__github__create_issue`) don't apply directly.
+
+To control which tools require permission prompts, use **Claude Code hooks**.
+
+### How It Works
+
+Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide:
+- **Exit 0** → Allow silently
+- **Exit 2** → Ask user for permission
+- **Exit 1** → Deny
+
+### Setup
+
+1. **Copy the example hook script:**
+   ```bash
+   cp examples/hooks/check-sensitive-tools.sh ~/.claude/hooks/
+   chmod +x ~/.claude/hooks/check-sensitive-tools.sh
+   ```
+
+2. **Configure Claude Code hooks** (in `~/.claude/settings.json` or project `.claude/settings.local.json`):
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         {
+           "matcher": "mcp__lazy-mcp__execute_tool",
+           "hooks": [
+             {
+               "type": "command",
+               "command": "~/.claude/hooks/check-sensitive-tools.sh"
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+3. **Customize sensitive tools** via environment variables:
+   ```bash
+   # Tools that require permission prompts
+   export LAZY_MCP_SENSITIVE_TOOLS="gmail.send_email,github.create_*,gitlab.create_*"
+
+   # Tools that are completely blocked
+   export LAZY_MCP_DENIED_TOOLS="*.force_delete_*"
+   ```
+
+### Default Sensitive Tools
+
+The example script includes sensible defaults for public-facing actions:
+
+| Server | Sensitive Tools |
+|--------|-----------------|
+| Gmail | `send_email`, `create_draft`, `delete_email` |
+| GitHub | `create_issue`, `create_pull_request`, `create_repository`, `push_files` |
+| GitLab | `create_issue`, `create_merge_request`, `accept_merge_request` |
+
+### Pattern Syntax
+
+- **Exact match:** `gmail.send_email`
+- **Server prefix:** `gmail.*` (all gmail tools)
+- **Suffix match:** `*.delete_*` (all delete operations)
+
 ## Credits
 
 Forked from [TBXark/mcp-proxy](https://github.com/voicetreelab/lazy-mcp) - extended with hierarchical routing, lazy loading, and stdio support.
