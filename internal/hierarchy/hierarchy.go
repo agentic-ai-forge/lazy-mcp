@@ -424,9 +424,17 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 
 	log.Printf("Executing tool: hierarchy_path=%s, server=%s, tool=%s", toolPath, serverName, actualToolName)
 
-	// Create a context with 15-second timeout for tool execution
-	toolCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Create a context with 30-second timeout for tool execution
+	// (increased from 15s to account for queuing time when serializing requests)
+	toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// Serialize tool calls to the same server to prevent concurrent stdio access.
+	// Stdio is a single-channel transport that cannot handle interleaved messages.
+	// See: https://github.com/voicetreelab/lazy-mcp/issues/8
+	mutex := registry.GetClientMutex(serverName)
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	// Call the tool on the actual MCP server
 	callRequest := mcp.CallToolRequest{}
@@ -444,6 +452,7 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 // ServerRegistry manages MCP client connections
 type ServerRegistry struct {
 	clients       map[string]*client.Client
+	clientMutex   map[string]*sync.Mutex // Per-client mutex for serializing tool calls
 	serverConfigs map[string]*config.MCPClientConfigV2
 	mu            sync.RWMutex
 }
@@ -452,8 +461,24 @@ type ServerRegistry struct {
 func NewServerRegistry(serverConfigs map[string]*config.MCPClientConfigV2) *ServerRegistry {
 	return &ServerRegistry{
 		clients:       make(map[string]*client.Client),
+		clientMutex:   make(map[string]*sync.Mutex),
 		serverConfigs: serverConfigs,
 	}
+}
+
+// GetClientMutex returns a mutex for the given server, creating one if needed.
+// This mutex serializes tool calls to prevent concurrent stdio access.
+func (r *ServerRegistry) GetClientMutex(serverName string) *sync.Mutex {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if m, exists := r.clientMutex[serverName]; exists {
+		return m
+	}
+
+	m := &sync.Mutex{}
+	r.clientMutex[serverName] = m
+	return m
 }
 
 // GetOrLoadServer gets an existing client or creates and initializes a new one
