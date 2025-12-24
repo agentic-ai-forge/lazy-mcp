@@ -443,6 +443,13 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 
 	result, err := client.GetClient().CallTool(toolCtx, callRequest)
 	if err != nil {
+		// Include inputSchema in error message to help LLMs self-correct parameter mistakes
+		if toolDef.InputSchema != nil {
+			schemaJSON, marshalErr := json.MarshalIndent(toolDef.InputSchema, "", "  ")
+			if marshalErr == nil {
+				return nil, fmt.Errorf("failed to call tool %s: %w\n\nExpected inputSchema:\n%s", actualToolName, err, string(schemaJSON))
+			}
+		}
 		return nil, fmt.Errorf("failed to call tool %s: %w", actualToolName, err)
 	}
 
