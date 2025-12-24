@@ -453,6 +453,17 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 		return nil, fmt.Errorf("failed to call tool %s: %w", actualToolName, err)
 	}
 
+	// Check if result has IsError set - append schema to help LLMs self-correct
+	if result != nil && result.IsError && toolDef.InputSchema != nil && len(result.Content) > 0 {
+		schemaJSON, marshalErr := json.MarshalIndent(toolDef.InputSchema, "", "  ")
+		if marshalErr == nil {
+			// Append schema to the first text content item
+			if textContent, ok := result.Content[0].(mcp.TextContent); ok {
+				textContent.Text += fmt.Sprintf("\n\nExpected inputSchema:\n%s", string(schemaJSON))
+				result.Content[0] = textContent
+			}
+		}
+	}
 	return result, nil
 }
 
