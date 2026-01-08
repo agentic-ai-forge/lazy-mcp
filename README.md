@@ -90,10 +90,11 @@ To control which tools require permission prompts, use **Claude Code hooks**.
 
 ### How It Works
 
-Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide:
-- **Exit 0** → Allow silently
-- **Exit 2** → Ask user for permission
-- **Exit 1** → Deny
+Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide permission by outputting JSON:
+
+- **Allow:** Exit 0 (no output)
+- **Ask:** Exit 0 with `{"hookSpecificOutput": {"permissionDecision": "ask", ...}}`
+- **Deny:** Exit 0 with `{"hookSpecificOutput": {"permissionDecision": "deny", ...}}`
 
 ### Setup
 
@@ -137,9 +138,9 @@ The example script includes sensible defaults for public-facing actions:
 
 | Server | Sensitive Tools |
 |--------|-----------------|
-| Gmail | `send_email`, `create_draft`, `delete_email` |
-| GitHub | `create_issue`, `create_pull_request`, `create_repository`, `push_files` |
-| GitLab | `create_issue`, `create_merge_request`, `accept_merge_request` |
+| Gmail | `send_email`, `create_draft`, `delete_email`, `trash_email` |
+| GitHub | `create_issue`, `create_pull_request`, `create_repository`, `push_files`, `create_or_update_file`, `create_branch`, `fork_repository` |
+| GitLab | `create_issue`, `create_merge_request`, `accept_merge_request`, `create_project`, `create_branch`, `create_or_update_file` |
 
 ### Pattern Syntax
 

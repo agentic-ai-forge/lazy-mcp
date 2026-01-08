@@ -23,6 +23,12 @@
 
 set -euo pipefail
 
+# Check for required dependencies
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is required for this hook script but is not installed." >&2
+    exit 1
+fi
+
 # Default sensitive tools (public-facing actions)
 DEFAULT_SENSITIVE_TOOLS=(
     # Gmail - sending/modifying emails
@@ -116,7 +122,8 @@ EOF
     exit 0
 }
 
-# Check against denied patterns first
+# Check against denied patterns first. If a tool matches any denied pattern,
+# it will always be denied, even if it also matches a sensitive pattern.
 for pattern in "${DENIED_TOOLS[@]}"; do
     [[ -z "$pattern" ]] && continue
     if matches_pattern "$TOOL_PATH" "$pattern"; then
