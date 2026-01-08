@@ -88,15 +88,14 @@ When using lazy-mcp with Claude Code, all tool calls go through `execute_tool`. 
 
 To control which tools require permission prompts, use **Claude Code hooks**.
 
-### How It Works
+### Option 1: Claude Code Native Hook (Recommended for Claude Code)
 
 Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide permission by outputting JSON:
-
 - **Allow:** Exit 0 (no output)
 - **Ask:** Exit 0 with `{"hookSpecificOutput": {"permissionDecision": "ask", ...}}`
 - **Deny:** Exit 0 with `{"hookSpecificOutput": {"permissionDecision": "deny", ...}}`
 
-### Setup
+#### Setup
 
 1. **Copy the example hook script:**
    ```bash
@@ -132,9 +131,37 @@ Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide
    export LAZY_MCP_DENIED_TOOLS="*.force_delete_*"
    ```
 
+### Option 2: Token-Based Hook (Recommended for OpenCode / General Use)
+
+Since not all agents support the `permissionDecision` JSON protocol, `lazy-mcp` also supports a universal "Token Hook" mechanism. This forces the agent to retry the operation after user confirmation.
+
+#### How It Works
+
+1. **First Call:** Hook checks for a token. If missing, it exits with error `CONFIRMATION_NEEDED` and the path to the required token.
+2. **Agent Response:** The agent catches this error, asks the user for confirmation, and creates the token file.
+3. **Retry:** The agent retries the tool call. The hook finds the token, deletes it (one-time use), and allows execution.
+
+#### Setup
+
+1. **Copy the token hook script:**
+   ```bash
+   cp examples/hooks/confirm-tool-token.sh /path/to/hooks/
+   chmod +x /path/to/hooks/confirm-tool-token.sh
+   ```
+
+2. **Configure your agent** to call this script *before* `execute_tool`.
+
+### Option 3: OpenCode Plugin
+
+For OpenCode users, a TypeScript plugin is available that logs warnings for sensitive actions.
+
+```bash
+cp examples/plugins/opencode-sensitive-tools.ts .opencode/plugin/sensitive-tools-check.ts
+```
+
 ### Default Sensitive Tools
 
-The example script includes sensible defaults for public-facing actions:
+The example scripts include sensible defaults for public-facing actions:
 
 | Server | Sensitive Tools |
 |--------|-----------------|
