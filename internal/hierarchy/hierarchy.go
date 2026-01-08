@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/voicetreelab/lazy-mcp/internal/client"
 	"github.com/voicetreelab/lazy-mcp/internal/config"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // HierarchyNode represents a node in the tool hierarchy
@@ -426,6 +426,8 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 
 	// Create a context with 30-second timeout for tool execution
 	// (increased from 15s to account for queuing time when serializing requests)
+	// Note: We create the timeout BEFORE acquiring the lock to enforce a total deadline
+	// for the operation. If we waited for the lock first, a client could hang indefinitely.
 	toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -458,6 +460,7 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 		schemaJSON, marshalErr := json.MarshalIndent(toolDef.InputSchema, "", "  ")
 		if marshalErr == nil {
 			// Append schema to the first text content item
+			// Note: TextContent is a value type, so we modify the copy and assign it back to the slice
 			if textContent, ok := result.Content[0].(mcp.TextContent); ok {
 				textContent.Text += fmt.Sprintf("\n\nExpected inputSchema:\n%s", string(schemaJSON))
 				result.Content[0] = textContent
@@ -486,6 +489,8 @@ func NewServerRegistry(serverConfigs map[string]*config.MCPClientConfigV2) *Serv
 
 // GetClientMutex returns a mutex for the given server, creating one if needed.
 // This mutex serializes tool calls to prevent concurrent stdio access.
+// Note: This map grows with the number of unique servers accessed. Since the set of
+// servers is bounded by the configuration/hierarchy, this is not a memory leak.
 func (r *ServerRegistry) GetClientMutex(serverName string) *sync.Mutex {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -572,4 +577,8 @@ func (r *ServerRegistry) Close() {
 		log.Printf("Closing MCP client: %s", name)
 		_ = client.Close()
 	}
+
+	// Clear the clients and mutex maps
+	r.clients = make(map[string]*client.Client)
+	r.clientMutex = make(map[string]*sync.Mutex)
 }
