@@ -39,8 +39,8 @@ Lazy MCP exposes two meta tools, which allows agents to explore a tree structure
    → Proxies request to Serena
    → Returns result
 ```
-![img_1.png](img_1.png)
-![img_2.png](img_2.png)
+![img_1.png](docs/images/img_1.png)
+![img_2.png](docs/images/img_2.png)
 
 ## Quick Start
 
@@ -99,11 +99,13 @@ Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide
 
 1. **Copy the example hook script:**
    ```bash
-   cp examples/hooks/check-sensitive-tools.sh ~/.claude/hooks/
-   chmod +x ~/.claude/hooks/check-sensitive-tools.sh
+   # For project-level hooks
+   mkdir -p .opencode/hooks
+   cp examples/hooks/check-sensitive-tools.sh .opencode/hooks/
+   chmod +x .opencode/hooks/check-sensitive-tools.sh
    ```
 
-2. **Configure Claude Code hooks** (in `~/.claude/settings.json` or project `.claude/settings.local.json`):
+2. **Configure OpenCode/Claude Code hooks** (in `~/.config/opencode/settings.json`, `~/.claude/settings.json` or project settings):
    ```json
    {
      "hooks": {
@@ -113,7 +115,26 @@ Claude Code's `PreToolUse` hooks can inspect the `tool_path` argument and decide
            "hooks": [
              {
                "type": "command",
-               "command": "~/.claude/hooks/check-sensitive-tools.sh"
+               "command": ".opencode/hooks/check-sensitive-tools.sh"
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+2. **Configure Claude Code hooks** (in `~/.opencode/settings.json` or project `.opencode/settings.local.json`):
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         {
+           "matcher": "mcp__lazy-mcp__execute_tool",
+           "hooks": [
+             {
+               "type": "command",
+               "command": "~/.opencode/hooks/check-sensitive-tools.sh"
              }
            ]
          }
@@ -145,8 +166,15 @@ Since not all agents support the `permissionDecision` JSON protocol, `lazy-mcp` 
 
 1. **Copy the token hook script:**
    ```bash
-   cp examples/hooks/confirm-tool-token.sh /path/to/hooks/
-   chmod +x /path/to/hooks/confirm-tool-token.sh
+   # For project-level configuration (recommended)
+   mkdir -p .opencode/plugin
+   cp examples/hooks/confirm-tool-token.sh .opencode/plugin/
+   chmod +x .opencode/plugin/confirm-tool-token.sh
+   
+   # OR for global configuration
+   # mkdir -p ~/.config/opencode/plugin
+   # cp examples/hooks/confirm-tool-token.sh ~/.config/opencode/plugin/
+   # chmod +x ~/.config/opencode/plugin/confirm-tool-token.sh
    ```
 
 2. **Configure your agent** to call this script *before* `execute_tool`.
