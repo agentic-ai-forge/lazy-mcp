@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/voicetreelab/lazy-mcp/internal/client"
 	"github.com/voicetreelab/lazy-mcp/internal/config"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // HierarchyNode represents a node in the tool hierarchy
@@ -424,9 +424,19 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 
 	log.Printf("Executing tool: hierarchy_path=%s, server=%s, tool=%s", toolPath, serverName, actualToolName)
 
-	// Create a context with 15-second timeout for tool execution
-	toolCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Create a context with 30-second timeout for tool execution
+	// (increased from 15s to account for queuing time when serializing requests)
+	// Note: We create the timeout BEFORE acquiring the lock to enforce a total deadline
+	// for the operation. If we waited for the lock first, a client could hang indefinitely.
+	toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// Serialize tool calls to the same server to prevent concurrent stdio access.
+	// Stdio is a single-channel transport that cannot handle interleaved messages.
+	// See: https://github.com/voicetreelab/lazy-mcp/issues/8
+	mutex := registry.GetClientMutex(serverName)
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	// Call the tool on the actual MCP server
 	callRequest := mcp.CallToolRequest{}
@@ -435,15 +445,35 @@ func (h *Hierarchy) HandleExecuteTool(ctx context.Context, registry *ServerRegis
 
 	result, err := client.GetClient().CallTool(toolCtx, callRequest)
 	if err != nil {
+		// Include inputSchema in error message to help LLMs self-correct parameter mistakes
+		if toolDef.InputSchema != nil {
+			schemaJSON, marshalErr := json.MarshalIndent(toolDef.InputSchema, "", "  ")
+			if marshalErr == nil {
+				return nil, fmt.Errorf("failed to call tool %s: %w\n\nExpected inputSchema:\n%s", actualToolName, err, string(schemaJSON))
+			}
+		}
 		return nil, fmt.Errorf("failed to call tool %s: %w", actualToolName, err)
 	}
 
+	// Check if result has IsError set - append schema to help LLMs self-correct
+	if result != nil && result.IsError && toolDef.InputSchema != nil && len(result.Content) > 0 {
+		schemaJSON, marshalErr := json.MarshalIndent(toolDef.InputSchema, "", "  ")
+		if marshalErr == nil {
+			// Append schema to the first text content item
+			// Note: TextContent is a value type, so we modify the copy and assign it back to the slice
+			if textContent, ok := result.Content[0].(mcp.TextContent); ok {
+				textContent.Text += fmt.Sprintf("\n\nExpected inputSchema:\n%s", string(schemaJSON))
+				result.Content[0] = textContent
+			}
+		}
+	}
 	return result, nil
 }
 
 // ServerRegistry manages MCP client connections
 type ServerRegistry struct {
 	clients       map[string]*client.Client
+	clientMutex   map[string]*sync.Mutex // Per-client mutex for serializing tool calls
 	serverConfigs map[string]*config.MCPClientConfigV2
 	mu            sync.RWMutex
 }
@@ -452,8 +482,26 @@ type ServerRegistry struct {
 func NewServerRegistry(serverConfigs map[string]*config.MCPClientConfigV2) *ServerRegistry {
 	return &ServerRegistry{
 		clients:       make(map[string]*client.Client),
+		clientMutex:   make(map[string]*sync.Mutex),
 		serverConfigs: serverConfigs,
 	}
+}
+
+// GetClientMutex returns a mutex for the given server, creating one if needed.
+// This mutex serializes tool calls to prevent concurrent stdio access.
+// Note: This map grows with the number of unique servers accessed. Since the set of
+// servers is bounded by the configuration/hierarchy, this is not a memory leak.
+func (r *ServerRegistry) GetClientMutex(serverName string) *sync.Mutex {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if m, exists := r.clientMutex[serverName]; exists {
+		return m
+	}
+
+	m := &sync.Mutex{}
+	r.clientMutex[serverName] = m
+	return m
 }
 
 // GetOrLoadServer gets an existing client or creates and initializes a new one
@@ -529,4 +577,8 @@ func (r *ServerRegistry) Close() {
 		log.Printf("Closing MCP client: %s", name)
 		_ = client.Close()
 	}
+
+	// Clear the clients and mutex maps
+	r.clients = make(map[string]*client.Client)
+	r.clientMutex = make(map[string]*sync.Mutex)
 }
